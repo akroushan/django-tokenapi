@@ -1,6 +1,9 @@
 from django.contrib.auth import authenticate
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
+from app.util import *
+import urllib2 
+import json
 
 try:
     from django.contrib.auth import get_user_model
@@ -22,9 +25,40 @@ def token_new(request):
     if request.method == 'POST':
         username = request.POST.get('username')
         password = request.POST.get('password')
+        mode = request.POST.get('mode')
+        access_token = request.POST.get('access_token')
+        
+    	if mode and access_token:
+    		if mode == 'facebook':
+    			response =  urllib2.urlopen("https://graph.facebook.com/v2.1/me?access_token="+access_token+"&format=json&method=get&pretty=0&suppress_http_code=1")
+    			output = response.read()
+                output = json.loads(output)
+                try:
+                    email = output['email']
+                except KeyError:
+                    return JsonError("Access token not valid")
+                first_name = output['first_name']
+                last_name = output['last_name']
+                gender = output['gender']
+                dob = None
+                mobile = None
+                password = None
+                mode = "facebook"
+                try:
+                    user = User.objects.get(username=email)
+                except User.DoesNotExist:
+                    a = create_new_user(email, password, first_name, last_name, dob, gender, mobile, mode)
+                    print a
+                    user = User.objects.get(username=email)
+                data = {
+                        'token': token_generator.make_token(user),
+                        'user': user.pk,
+                }
 
-        if username and password:
-            user = authenticate(username=username, password=password)
+                return JsonResponse(data)
+
+        elif username and password:
+            user = authenticate(username=username, password=password, mode=mode, access_token= access_token)
 
             if user:
                 TOKEN_CHECK_ACTIVE_USER = getattr(settings, "TOKEN_CHECK_ACTIVE_USER", False)
@@ -40,7 +74,7 @@ def token_new(request):
             else:
                 return JsonResponseUnauthorized("Unable to log you in, please try again.")
         else:
-            return JsonError("Must include 'username' and 'password' as POST parameters.")
+            return JsonError("Must include 'username' and 'password' or 'username' and 'mode' and 'access_token' as POST parameters.")
     else:
         return JsonError("Must access via a POST request.")
 
